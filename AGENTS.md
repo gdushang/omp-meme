@@ -72,7 +72,8 @@ omp -e . --auto-approve                   # 仅调试时需要：跳过所有工
 - **命名**：函数/变量 `camelCase`，类型/类 `PascalCase`，常量 `UPPER_SNAKE_CASE`；标识符英文，面用户的文案中文。
 - **错误处理**：库函数 `throw new Error("中文原因")`；命令层统一 `try/catch` 后 `ctx.ui.notify(message, "error")`，不让异常冒泡终止会话。
 - **异步/定时器**：事件处理器尽量同步返回；后台工作使用 `ctx.setTimeout`/`ctx.setInterval`（原始定时器抛错会终止整个进程），并在 `session_shutdown` 清理。
-- **状态**：扩展实例内用闭包变量（`let config`）与按 session 的 `Map`；持久化只写 `<userRoot>/omp-meme.json`（`{enabled, debug}`）。
+- **状态**：扩展实例内用闭包变量（`let config`）与按 session 的 `Map`；持久化只写 `<userRoot>/omp-meme.json`（`{enabled, debug, gear}`）。
+- **档位**：`gear` 为 `off` / `auto` / `active` / `always`，默认 `auto`；`before_agent_start` 按档位选择 `MEME_GEAR_PROMPTS` 中的一段拼进系统提示。`/meme off` 是全局关闭，与 `gear=off`（仍注入“不主动”规则）不同。
 - **图库**：`MemeLibrary` 通过构造函数注入 roots；测试永远传 `[{ dir, bundled: false }]`，不要碰默认 `~/.omp/memes`。
 - **导入安全**：ZIP 条目过 `safeEntryName` + `isPathInside`；图片只接受 `.png/.jpg/.jpeg/.webp/.bmp`；URL 导入只接受 ZIP（magic/content-type/后缀任一命中），上限 64 MB、超时 30 s。
 - **图库语义**：tag = `memes/` 下第一层目录名；caption = 文件名 stem；keywords = tag + caption 分词 + manifest 的 `tags`/`name`/`description`。`query` 是子串 AND 匹配，不是全词匹配。
@@ -82,6 +83,7 @@ omp -e . --auto-approve                   # 仅调试时需要：跳过所有工
   - 新增情绪别名 → `TAG_ALIASES`、`MEME_SYSTEM_PROMPT`、`send_meme` 描述、README。
   - 新增 `/meme` 子命令 → `MEME_SUBCOMMANDS`、命令 switch、help 文案、`completeMemeArgs`、README。
   - 新增配置项 → `MemeConfig`/默认值/读取语义（`config.ts`）、`/meme` 命令、`test/config.test.ts`。
+  - 调整斗图档位 → `MEME_GEAR_PROMPTS`、`MEME_GEARS`、`/meme gear` 补全、README 档位表。
 
 ## Important Files
 
@@ -104,7 +106,7 @@ omp -e . --auto-approve                   # 仅调试时需要：跳过所有工
 - `OMP_MEME_DIR` 只覆盖用户图库根（默认 `~/.omp/memes`），内置根始终是仓库 `memes/`。
 - `manifest.description` 会整段进入该包每张图的 keywords；写宽泛描述会降低选图精度。
 - `exportToZip` 会打包 pack 目录下所有非隐藏文件（含 `index.db`）；`default` pack 的目录就是用户根，导出它会递归整个用户根；指定不存在的图库会回退导出全部。
-- 配置读取语义：`enabled` 只有严格 `=== false` 才关闭，`debug` 只有严格 `=== true` 才开启；启动时读一次，运行中外部修改不会热更新。
+- 配置读取语义：`enabled` 只有严格 `=== false` 才关闭，`debug` 只有严格 `=== true` 才开启，`gear` 非法值回退 `auto`；启动时读一次，运行中外部修改不会热更新。
 - 内置根只读，导入永远写用户根；`pick` 对用户/内置图库等权随机，不优先用户图库。
 - `send_meme` 已标记 `approval: "read"`，默认审批模式下不会弹窗；`--auto-approve` 只用于调试其他工具。
 

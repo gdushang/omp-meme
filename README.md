@@ -75,7 +75,7 @@ extensions:
 | `/meme export [图库] [目标.zip]` | 导出图库；默认导出全部用户图库到当前目录 |
 | `/meme rescan` | 重新扫描图库目录 |
 | `/meme path` | 显示图库根目录 |
-| `/meme on` / `/meme off` | 开启/关闭表情包（关闭后不注入提示词、不注册工具、不发图） |
+| `/meme on` / `/meme off` | 开启/关闭表情包（关闭后不注入提示词、从活动工具移除 `send_meme`、不发图） |
 | `/meme gear [off\|auto\|active\|always]` | 斗图档位：关闭 / 看气氛 / 活跃 / 每轮都发 |
 | `/meme status` | 查看开关、档位与调试文本状态 |
 | `/meme debug [on\|off]` | 是否在图片上方显示 `[表情: 描述 · 分类]`，默认关闭 |
