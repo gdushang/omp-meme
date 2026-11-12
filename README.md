@@ -77,6 +77,7 @@ extensions:
 | `/meme path` | 显示图库根目录 |
 | `/meme on` / `/meme off` | 开启/关闭表情包（关闭后不注入提示词、从活动工具移除 `send_meme`、不发图） |
 | `/meme gear [off\|auto\|active\|always]` | 斗图档位：关闭 / 看气氛 / 活跃 / 每轮都发 |
+| `/meme prompt [文本\|reset]` | 查看/编辑自定义提示词；无参数打开多行编辑器 |
 | `/meme status` | 查看开关、档位与调试文本状态 |
 | `/meme debug [on\|off]` | 是否在图片上方显示 `[表情: 描述 · 分类]`，默认关闭 |
 
@@ -108,7 +109,9 @@ extensions:
 /meme gear auto      # 切换并持久化
 ```
 
-档位与开关写在 `<userRoot>/omp-meme.json`（`{enabled, debug, gear}`）。`/meme off` 是全局关闭：不注入提示词并从活动工具中移除 `send_meme`；`/meme on` 恢复。
+自定义提示词（对应 dsh-meme 的 `companionPrompt`）：`/meme prompt` 打开多行编辑器，`/meme prompt <文本>` 直接设置，`/meme prompt reset` 恢复默认。自定义文本原文保留，只在末尾追加当前档位规则；默认文本包含「大肥鱼就是你自己」等身份设定。
+
+档位与开关写在 `<userRoot>/omp-meme.json`（`{enabled, debug, gear, prompt}`）。`/meme off` 是全局关闭：不注入提示词并从活动工具中移除 `send_meme`；`/meme on` 恢复。
 
 ## 工作方式
 

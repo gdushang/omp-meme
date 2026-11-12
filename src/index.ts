@@ -35,6 +35,7 @@ const MEME_SUBCOMMANDS: Array<{ name: string; description: string }> = [
 	{ name: "status", description: "查看开关状态" },
 	{ name: "debug", description: "显示/隐藏表情标签文本" },
 	{ name: "gear", description: "斗图档位：off/auto/active/always" },
+	{ name: "prompt", description: "查看/编辑自定义提示词" },
 ];
 
 function completeMemeArgs(prefix: string, library: MemeLibrary): AutocompleteItem[] | null {
@@ -80,6 +81,9 @@ function completeMemeArgs(prefix: string, library: MemeLibrary): AutocompleteIte
 			{ value: "active", description: "大部分合适回合都发" },
 			{ value: "always", description: "每轮都发" },
 		]);
+	}
+	if (subcommand === "prompt") {
+		return complete([{ value: "reset", description: "恢复默认提示词" }]);
 	}
 	return null;
 }
@@ -232,7 +236,10 @@ export default function ompMeme(pi: ExtensionAPI) {
 		if (event.reason !== "prompt") return;
 		if (ctx.agent.kind !== "main") return;
 		if (!pi.getActiveTools().includes("send_meme")) return;
-		const prompt = `[表情包]\n${MEME_IDENTITY}\n${MEME_GEAR_PROMPTS[config.gear]}\n${MEME_RULES}`;
+		const custom = config.prompt.trim();
+		const prompt = custom
+			? `${custom}\n\n${MEME_GEAR_PROMPTS[config.gear]}`
+			: `[表情包]\n${MEME_IDENTITY}\n${MEME_GEAR_PROMPTS[config.gear]}\n${MEME_RULES}`;
 		return { systemPrompt: [...event.systemPrompt, prompt] };
 	});
 
@@ -372,11 +379,36 @@ export default function ompMeme(pi: ExtensionAPI) {
 						ctx.ui.notify(`斗图档位已改为 ${value}。`, "info");
 						return;
 					}
+					case "prompt": {
+						const raw = words.join(" ").trim();
+						if (raw === "reset") {
+							config = { ...config, prompt: "" };
+							saveMemeConfig(library.userRoot, config);
+							ctx.ui.notify("已恢复默认提示词。", "info");
+							return;
+						}
+						if (raw) {
+							config = { ...config, prompt: raw };
+							saveMemeConfig(library.userRoot, config);
+							ctx.ui.notify("已保存自定义提示词（原文保留，仅自动追加档位规则）。", "info");
+							return;
+						}
+						const prefill =
+							config.prompt ||
+							`[表情包]\n${MEME_IDENTITY}\n${MEME_GEAR_PROMPTS[config.gear]}\n${MEME_RULES}`;
+						const edited = await ctx.ui.editor("编辑表情包提示词（留空恢复默认）", prefill);
+						if (edited === undefined) return;
+						config = { ...config, prompt: edited.trim() };
+						saveMemeConfig(library.userRoot, config);
+						ctx.ui.notify(config.prompt ? "已保存自定义提示词。" : "已恢复默认提示词。", "info");
+						return;
+					}
 					case "status": {
 						ctx.ui.notify(
 							[
 								config.enabled ? "表情包：已开启" : "表情包：已关闭",
 								`斗图档位：${config.gear}`,
+								config.prompt ? `提示词：自定义（${config.prompt.length} 字）` : "提示词：默认",
 								config.debug ? "调试文本：开启" : "调试文本：关闭",
 							].join("\n"),
 							"info",
@@ -402,6 +434,7 @@ export default function ompMeme(pi: ExtensionAPI) {
 								`表情包：${stats.packs} 个图库，${stats.images} 张静态图片（${config.enabled ? `已开启，档位 ${config.gear}` : "已关闭"}）`,
 								"/meme on | off | status",
 								"/meme gear [off|auto|active|always]",
+								"/meme prompt [文本|reset]",
 								"/meme debug [on|off]",
 								"/meme list [分类|关键词]",
 								"/meme packs",
