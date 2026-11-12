@@ -1,6 +1,6 @@
 # omp-meme
 
-仓库：<https://github.com/gudushang/omp-meme>
+仓库：<https://github.com/gdushang/omp-meme>
 
 给 [omp](https://omp.sh) 用的表情包插件：模型按聊天情绪挑一张**静态图片**，图片追加在本轮回复末尾显示。参考 [dsh-meme](https://github.com/yyh-001/dsh-meme) 的图库思路，适配终端的图片协议，不发送动图。
 
@@ -14,23 +14,28 @@
 
 ## 安装
 
-任选一种：
+从 git 安装（推荐）：
 
 ```sh
-git clone https://github.com/gudushang/omp-meme.git
+omp plugin install https://github.com/gdushang/omp-meme.git
+omp plugin list          # 确认已安装
+```
 
-# 临时加载
+临时加载（不安装）：
+
+```sh
+git clone https://github.com/gdushang/omp-meme.git
 omp -e ./omp-meme
 ```
 
-持久（用户级）：把仓库放进 `~/.omp/agent/extensions/omp-meme/`，或在 `~/.omp/agent/config.yml` 写仓库的绝对路径：
+手动持久（用户级）：把仓库放进 `~/.omp/agent/extensions/omp-meme/`，或在 `~/.omp/agent/config.yml` 写仓库的绝对路径：
 
 ```yaml
 extensions:
    - ~/.omp/agent/extensions/omp-meme
 ```
 
-插件清单在 `package.json#omp.extensions`。
+插件清单在 `package.json#omp.extensions`；安装或修改后重启 omp 生效。
 
 ## 图库
 
