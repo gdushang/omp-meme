@@ -1,0 +1,13 @@
+{
+	"name": "omp-meme",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"description": "omp 表情包插件：静态图片图库、回复末尾自动配图、ZIP 导入导出",
+	"omp": {
+		"extensions": ["./src/index.ts"]
+	},
+	"pi": {
+		"extensions": ["./src/index.ts"]
+	}
+}
