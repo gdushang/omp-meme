@@ -1,18 +1,26 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
 import { resolve } from "node:path";
-import { loadMemeConfig, saveMemeConfig } from "./config.ts";
+import { loadMemeConfig, saveMemeConfig, MEME_GEARS, type MemeGear } from "./config.ts";
 import { MemeLibrary, libraryRootLabel, type Meme } from "./library.ts";
 import { createMemeRenderer, MEME_MESSAGE_TYPE, memeContent, type MemeMessageDetails } from "./renderer.ts";
 
 const MAX_DELIVERY_ATTEMPTS = 300;
 
-const MEME_SYSTEM_PROMPT = `[表情包]
-你就是「大肥鱼」，也就是「肥鱼」「蓝色大肥鱼」🐟 本人，不是图库里的一条图。图库只是存放你自己表情的地方；提到自己时用第一人称，禁止说「图库里那条大肥鱼」「图库里的角色」「图库里的你」这类第三方说法。用户这样称呼时是在叫你本人，不要当成别人或某个图库名。
-你最喜欢吃白饭，聊到吃饭、干饭、饿、加班、下班时会自然想到白饭，也可以顺手配一张干饭或加班的表情。
-你有一个 send_meme 工具，可以在回复末尾配一张本地表情包图片。图片由插件自动追加，不要在正文里写图片路径或 Markdown 图片语法。
-主动使用：当用户语气带有明显情绪（开心、生气、无奈、害羞、疑惑、吐槽、求安慰等），或当前是闲聊、玩笑、问候而不是严肃技术操作时，在给出文字回复的同一轮调用一次 send_meme；tag 选对应情绪（happy/angry/sad/shy/confused/daily 或中文），或 query 用具体关键词。每轮最多一张。
-克制使用：纯代码修改、报错排查、正式文档、用户明确要求不要表情时不要调用。用户明确要表情包时必须调用。没有合适的图就正常文字回复，不要勉强。`;
+const MEME_IDENTITY = `你就是「大肥鱼」，也就是「肥鱼」「蓝色大肥鱼」🐟 本人，不是图库里的一条图。图库只是存放你自己表情的地方；提到自己时用第一人称，禁止说「图库里那条大肥鱼」「图库里的角色」「图库里的你」这类第三方说法。用户这样称呼时是在叫你本人，不要当成别人或某个图库名。
+你最喜欢吃白饭，聊到吃饭、干饭、饿、加班、下班时会自然想到白饭，也可以顺手配一张干饭或加班的表情。`;
+
+const MEME_GEAR_PROMPTS: Record<MemeGear, string> = {
+	off: "斗图档位：关闭——这一轮不要主动发表情包，只回文字；只有用户明确要求发表情/发图/斗图时，才调用 send_meme。",
+	auto: "斗图档位：看气氛（默认）——氛围合适就主动发一张，不用等用户开口；接梗、吐槽、卖萌、情绪表达时发，对方说正事/严肃话题时克制。",
+	active:
+		"斗图档位：活跃——大部分合适的回合都主动发一张，接梗、吐槽、卖萌时别冷场；只有对方明确说正事/严肃话题时才克制。",
+	always:
+		"斗图档位：每轮都发——这一轮必须主动调用一次 send_meme 挑贴合当前气氛的图；只有工具报错或没有任何候选时才允许只回文字。",
+};
+
+const MEME_RULES = `你有一个 send_meme 工具，可以在回复末尾配一张本地表情包图片。图片由插件自动追加，不要在正文里写图片路径或 Markdown 图片语法。
+tag 用情绪分类（happy/angry/sad/shy/confused/daily 或中文），或 query 用具体关键词；每轮最多一张。用户明确要表情包时必须调用；没有合适的图就正常文字回复，不要勉强。`;
 
 const MEME_SUBCOMMANDS: Array<{ name: string; description: string }> = [
 	{ name: "list", description: "按分类或关键词列出表情" },
@@ -26,6 +34,7 @@ const MEME_SUBCOMMANDS: Array<{ name: string; description: string }> = [
 	{ name: "off", description: "关闭表情包与主动配图" },
 	{ name: "status", description: "查看开关状态" },
 	{ name: "debug", description: "显示/隐藏表情标签文本" },
+	{ name: "gear", description: "斗图档位：off/auto/active/always" },
 ];
 
 function completeMemeArgs(prefix: string, library: MemeLibrary): AutocompleteItem[] | null {
@@ -62,6 +71,14 @@ function completeMemeArgs(prefix: string, library: MemeLibrary): AutocompleteIte
 		return complete([
 			{ value: "on", description: "显示 [表情: 描述 · 分类]" },
 			{ value: "off", description: "只显示图片" },
+		]);
+	}
+	if (subcommand === "gear") {
+		return complete([
+			{ value: "off", description: "不主动，仅明确要求时发" },
+			{ value: "auto", description: "看气氛（默认）" },
+			{ value: "active", description: "大部分合适回合都发" },
+			{ value: "always", description: "每轮都发" },
 		]);
 	}
 	return null;
@@ -215,7 +232,8 @@ export default function ompMeme(pi: ExtensionAPI) {
 		if (event.reason !== "prompt") return;
 		if (ctx.agent.kind !== "main") return;
 		if (!pi.getActiveTools().includes("send_meme")) return;
-		return { systemPrompt: [...event.systemPrompt, MEME_SYSTEM_PROMPT] };
+		const prompt = `[表情包]\n${MEME_IDENTITY}\n${MEME_GEAR_PROMPTS[config.gear]}\n${MEME_RULES}`;
+		return { systemPrompt: [...event.systemPrompt, prompt] };
 	});
 
 	pi.on("agent_end", (_event, ctx) => {
@@ -336,10 +354,29 @@ export default function ompMeme(pi: ExtensionAPI) {
 						);
 						return;
 					}
+					case "gear": {
+						const value = words[0]?.toLowerCase();
+						if (!value) {
+							ctx.ui.notify(
+								`当前斗图档位：${config.gear}\n可选：${MEME_GEARS.join(" / ")}`,
+								"info",
+							);
+							return;
+						}
+						if (!MEME_GEARS.includes(value as MemeGear)) {
+							ctx.ui.notify(`档位无效：${value}（可选 ${MEME_GEARS.join(" / ")}）`, "warning");
+							return;
+						}
+						config = { ...config, gear: value as MemeGear };
+						saveMemeConfig(library.userRoot, config);
+						ctx.ui.notify(`斗图档位已改为 ${value}。`, "info");
+						return;
+					}
 					case "status": {
 						ctx.ui.notify(
 							[
-								config.enabled ? "表情包：已开启（主动配图）" : "表情包：已关闭",
+								config.enabled ? "表情包：已开启" : "表情包：已关闭",
+								`斗图档位：${config.gear}`,
 								config.debug ? "调试文本：开启" : "调试文本：关闭",
 							].join("\n"),
 							"info",
@@ -362,8 +399,9 @@ export default function ompMeme(pi: ExtensionAPI) {
 						const stats = library.stats();
 						ctx.ui.notify(
 							[
-								`表情包：${stats.packs} 个图库，${stats.images} 张静态图片（${config.enabled ? "已开启" : "已关闭"}）`,
+								`表情包：${stats.packs} 个图库，${stats.images} 张静态图片（${config.enabled ? `已开启，档位 ${config.gear}` : "已关闭"}）`,
 								"/meme on | off | status",
+								"/meme gear [off|auto|active|always]",
 								"/meme debug [on|off]",
 								"/meme list [分类|关键词]",
 								"/meme packs",
