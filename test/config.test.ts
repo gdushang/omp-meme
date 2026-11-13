@@ -8,38 +8,27 @@ const temp = mkdtempSync(join(tmpdir(), "omp-meme-config-"));
 afterAll(() => rmSync(temp, { recursive: true, force: true }));
 
 describe("meme config", () => {
-	test("defaults to enabled, auto gear, default prompt", () => {
-		expect(loadMemeConfig(join(temp, "missing"))).toEqual({
-			enabled: true,
-			debug: false,
-			gear: "auto",
-			prompt: "",
-		});
+	test("defaults to auto gear and default prompt", () => {
+		expect(loadMemeConfig(join(temp, "missing"))).toEqual({ debug: false, gear: "auto", prompt: "" });
 	});
 
-	test("round-trips the switches, gear and custom prompt", () => {
-		saveMemeConfig(temp, { enabled: false, debug: true, gear: "always", prompt: "自定义人设" });
-		expect(loadMemeConfig(temp)).toEqual({
-			enabled: false,
-			debug: true,
-			gear: "always",
-			prompt: "自定义人设",
-		});
+	test("round-trips gear, debug and custom prompt", () => {
+		saveMemeConfig(temp, { debug: true, gear: "always", prompt: "自定义人设" });
+		expect(loadMemeConfig(temp)).toEqual({ debug: true, gear: "always", prompt: "自定义人设" });
 		expect(JSON.parse(readFileSync(memeConfigPath(temp), "utf8"))).toEqual({
-			enabled: false,
 			debug: true,
 			gear: "always",
 			prompt: "自定义人设",
 		});
-		saveMemeConfig(temp, { enabled: true, debug: false, gear: "off", prompt: "" });
-		expect(loadMemeConfig(temp)).toEqual({ enabled: true, debug: false, gear: "off", prompt: "" });
+		saveMemeConfig(temp, { debug: false, gear: "off", prompt: "" });
+		expect(loadMemeConfig(temp)).toEqual({ debug: false, gear: "off", prompt: "" });
 	});
 
 	test("falls back to defaults on corrupt config or unknown gear", () => {
-		saveMemeConfig(temp, { enabled: false, debug: true, gear: "always", prompt: "x" });
+		saveMemeConfig(temp, { debug: true, gear: "always", prompt: "x" });
 		writeFileSync(memeConfigPath(temp), "{broken");
-		expect(loadMemeConfig(temp)).toEqual({ enabled: true, debug: false, gear: "auto", prompt: "" });
-		writeFileSync(memeConfigPath(temp), JSON.stringify({ enabled: true, debug: false, gear: "turbo" }));
+		expect(loadMemeConfig(temp)).toEqual({ debug: false, gear: "auto", prompt: "" });
+		writeFileSync(memeConfigPath(temp), JSON.stringify({ debug: true, gear: "turbo" }));
 		expect(loadMemeConfig(temp).gear).toBe("auto");
 	});
 });

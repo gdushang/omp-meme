@@ -6,13 +6,12 @@ export type MemeGear = "off" | "auto" | "active" | "always";
 export const MEME_GEARS: readonly MemeGear[] = ["off", "auto", "active", "always"];
 
 export interface MemeConfig {
-	enabled: boolean;
 	debug: boolean;
 	gear: MemeGear;
 	prompt: string;
 }
 
-const DEFAULT_CONFIG: MemeConfig = { enabled: true, debug: false, gear: "auto", prompt: "" };
+const DEFAULT_CONFIG: MemeConfig = { debug: false, gear: "auto", prompt: "" };
 
 function normalizeGear(value: unknown): MemeGear {
 	return value === "off" || value === "auto" || value === "active" || value === "always" ? value : "auto";
@@ -27,13 +26,11 @@ export function loadMemeConfig(root: string): MemeConfig {
 	if (!existsSync(path)) return { ...DEFAULT_CONFIG };
 	try {
 		const parsed = JSON.parse(readFileSync(path, "utf8")) as {
-			enabled?: unknown;
 			debug?: unknown;
 			gear?: unknown;
 			prompt?: unknown;
 		};
 		return {
-			enabled: parsed?.enabled !== false,
 			debug: parsed?.debug === true,
 			gear: normalizeGear(parsed?.gear),
 			prompt: typeof parsed?.prompt === "string" ? parsed.prompt : "",

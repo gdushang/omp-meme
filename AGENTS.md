@@ -14,14 +14,14 @@
 
 1. `registerMessageRenderer("omp-meme")` — 渲染追加的图片消息。
 2. `registerTool("send_meme")` — 模型按 `tag`/`query` 选图（`approval: "read"`、`loadMode: "essential"`）。
-3. 事件：`before_agent_start`（注入提示词）、`agent_end`（投递）、`session_start`（应用关闭状态）、`session_shutdown`（清理）。
+3. 事件：`before_agent_start`（注入提示词）、`agent_end`（投递）、`session_shutdown`（清理）。
 4. `registerCommand("meme")` — 图库、开关、导入导出命令。
 
 数据流：
 
 ```text
 用户消息
-  → before_agent_start：enabled + 主会话 + send_meme 在活动工具集 → 追加 MEME_SYSTEM_PROMPT
+  → before_agent_start：主会话 + send_meme 在活动工具集 → 追加 MEME_SYSTEM_PROMPT
   → 模型调用 send_meme(tag/query)
   → MemeLibrary.pick() → pending.set(sessionId, {path, caption, tag, pack})
   → agent_end：50ms 轮询到会话空闲（最多 300 次 ≈15s）
@@ -33,12 +33,12 @@
 
 - 扩展加载期只能注册；`pi.sendMessage`、`pi.getActiveTools` 等运行期动作必须在事件/命令/工具内调用。
 - `agent_end` 触发时 `session.isStreaming` 仍为 true（`promptInFlightCount > 0`），必须轮询到空闲再发，否则消息会被 steer 进当前轮。
-- `pending` 是 `Map<sessionId, details>`；每个 session 只有一个槽位，同一轮多次 `send_meme` 只有最后一张生效。`session_shutdown` 只删自己的键，`/meme off` 清空全部。
+- `pending` 是 `Map<sessionId, details>`；每个 session 只有一个槽位，同一轮多次 `send_meme` 只有最后一张生效。`session_shutdown` 只删自己的键。
 - `/meme send` 直接调用 `sendMemeMessage`，**不写 pending**；可能与工具选中的图同时出现。
 - 投递轮询超时（约 15 s）后退化为 `deliverAs: "nextTurn"`，此时消息被隐藏到下一轮；`--print` 或长期忙碌的会话可能看不到。
 - 图片字节不写入会话：`details` 只存绝对路径，渲染时读取；`src/image.ts` 维护最多 64 条按 mtime 失效的 base64 缓存。
 - 内置图库根由 `new URL("../memes", import.meta.url)` 决定（`src/library.ts`），仓库必须保留 `src/` 与 `memes/` 的相对位置。
-- 关闭语义：`/meme off` 不注入提示词、从活动工具中移除 `send_meme`（工具本身仍注册）、清空 pending、`/meme send` 拒绝；`/meme on` 恢复。
+- 档位语义：没有全局 on/off。`gear=off` 仍注入“不主动”规则，工具保持可用，用户明确要求时能发；`gear=always` 要求每轮调用一次；彻底禁用插件用宿主的 `omp plugin disable omp-meme`。
 
 ## Key Directories
 
@@ -72,13 +72,13 @@ omp -e . --auto-approve                   # 仅调试时需要：跳过所有工
 - **命名**：函数/变量 `camelCase`，类型/类 `PascalCase`，常量 `UPPER_SNAKE_CASE`；标识符英文，面用户的文案中文。
 - **错误处理**：库函数 `throw new Error("中文原因")`；命令层统一 `try/catch` 后 `ctx.ui.notify(message, "error")`，不让异常冒泡终止会话。
 - **异步/定时器**：事件处理器尽量同步返回；后台工作使用 `ctx.setTimeout`/`ctx.setInterval`（原始定时器抛错会终止整个进程），并在 `session_shutdown` 清理。
-- **状态**：扩展实例内用闭包变量（`let config`）与按 session 的 `Map`；持久化只写 `<userRoot>/omp-meme.json`（`{enabled, debug, gear, prompt}`）。
-- **档位**：`gear` 为 `off` / `auto` / `active` / `always`，默认 `auto`；`before_agent_start` 按档位选择 `MEME_GEAR_PROMPTS` 中的一段拼进系统提示。`/meme off` 是全局关闭，与 `gear=off`（仍注入“不主动”规则）不同。
+- **状态**：扩展实例内用闭包变量（`let config`）与按 session 的 `Map`；持久化只写 `<userRoot>/omp-meme.json`（`{debug, gear, prompt}`）。
+- **档位**：`gear` 为 `off` / `auto` / `active` / `always`，默认 `auto`；`before_agent_start` 按档位选择 `MEME_GEAR_PROMPTS` 中的一段拼进系统提示。`/meme gear` 无参数时打印当前档位与各档含义。
 - **自定义提示词**：`config.prompt` 非空时原文注入，只在末尾追加当前档位规则（对齐 dsh-meme 的 `companionPrompt`）；为空时使用内置身份 + 档位 + 规则。`/meme prompt [文本|reset]` 管理，无参数打开多行编辑器。
 - **图库**：`MemeLibrary` 通过构造函数注入 roots；测试永远传 `[{ dir, bundled: false }]`，不要碰默认 `~/.omp/memes`。
 - **导入安全**：ZIP 条目过 `safeEntryName` + `isPathInside`；图片只接受 `.png/.jpg/.jpeg/.webp/.bmp`；URL 导入只接受 ZIP（magic/content-type/后缀任一命中），上限 64 MB、超时 30 s。
 - **图库语义**：tag = `memes/` 下第一层目录名；caption = 文件名 stem；keywords = tag + caption 分词 + manifest 的 `tags`/`name`/`description`。`query` 是子串 AND 匹配，不是全词匹配。
-- **开关**：`enabled` 默认 true，`debug` 默认 false；`debug` 只控制是否在图片上方绘制 `[表情: 描述 · 分类]`。
+- **调试**：`debug` 默认 false，只控制是否在图片上方绘制 `[表情: 描述 · 分类]`；没有全局 `enabled` 开关。
 - **改动需同步的位置**：
   - 新增图片格式 → `IMAGE_EXTENSIONS`（`library.ts`）、`MIME_BY_EXTENSION`（`image.ts`）、README、测试。
   - 新增情绪别名 → `TAG_ALIASES`、`MEME_SYSTEM_PROMPT`、`send_meme` 描述、README。
@@ -108,7 +108,7 @@ omp -e . --auto-approve                   # 仅调试时需要：跳过所有工
 - `OMP_MEME_DIR` 只覆盖用户图库根（默认 `~/.omp/memes`），内置根始终是仓库 `memes/`。
 - `manifest.description` 会整段进入该包每张图的 keywords；写宽泛描述会降低选图精度。
 - `exportToZip` 会打包 pack 目录下所有非隐藏文件（含 `index.db`）；`default` pack 的目录就是用户根，导出它会递归整个用户根；指定不存在的图库会回退导出全部。
-- 配置读取语义：`enabled` 只有严格 `=== false` 才关闭，`debug` 只有严格 `=== true` 才开启，`gear` 非法值回退 `auto`，`prompt` 只接受字符串；启动时读一次，运行中外部修改不会热更新。
+- 配置读取语义：`debug` 只有严格 `=== true` 才开启，`gear` 非法值回退 `auto`，`prompt` 只接受字符串；启动时读一次，运行中外部修改不会热更新。
 - 内置根只读，导入永远写用户根；`pick` 对用户/内置图库等权随机，不优先用户图库。
 - `send_meme` 已标记 `approval: "read"`，默认审批模式下不会弹窗；`--auto-approve` 只用于调试其他工具。
 
@@ -122,4 +122,4 @@ omp -e . --auto-approve                   # 仅调试时需要：跳过所有工
   - 模块级 `mkdtempSync(join(tmpdir(), "omp-meme-<module>-"))`，`afterAll` 递归清理；每个用例用独立子目录。
   - HTTP 用 `Bun.serve({ port: 0 })` + `http://127.0.0.1:${port}`，`try/finally` 中 `server.stop(true)`。
   - ZIP 夹具直接用被测的 `writeZip` 生成；图片内容可用任意字节，不依赖真实解码。
-- 手工冒烟清单：`omp -e .` 启动无错误 → `/meme packs`（内置 24 张）→ `/meme send happy` → 情绪对话触发 `send_meme` 且图片在回复后 → `/meme debug on` 显示标签 → `/meme off` 后情绪对话不再调用 → `/meme import`/`export` 往返。
+- 手工冒烟清单：`omp -e .` 启动无错误 → `/meme packs`（内置 24 张）→ `/meme send happy` → 情绪对话触发 `send_meme` 且图片在回复后 → `/meme debug on` 显示标签 → `/meme gear off` 后情绪对话不再主动调用 → `/meme import`/`export` 往返。

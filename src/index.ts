@@ -1,8 +1,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
-import type { AutocompleteItem } from "@oh-my-pi/pi-tui";
-import { resolve } from "node:path";
+import { Spacer, Text, type AutocompleteItem } from "@oh-my-pi/pi-tui";
+import { readdirSync, type Dirent } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { loadMemeConfig, saveMemeConfig, MEME_GEARS, type MemeGear } from "./config.ts";
-import { MemeLibrary, libraryRootLabel, type Meme } from "./library.ts";
+import { MemeLibrary, libraryRootLabel, TAG_ALIASES, type Meme } from "./library.ts";
 import { createMemeRenderer, MEME_MESSAGE_TYPE, memeContent, type MemeMessageDetails } from "./renderer.ts";
 
 const MAX_DELIVERY_ATTEMPTS = 300;
@@ -30,24 +32,111 @@ const MEME_SUBCOMMANDS: Array<{ name: string; description: string }> = [
 	{ name: "export", description: "导出图库为 ZIP" },
 	{ name: "rescan", description: "重新扫描图库目录" },
 	{ name: "path", description: "显示图库根目录" },
-	{ name: "on", description: "开启表情包与主动配图" },
-	{ name: "off", description: "关闭表情包与主动配图" },
-	{ name: "status", description: "查看开关状态" },
+	{ name: "status", description: "查看档位、提示词与调试状态" },
 	{ name: "debug", description: "显示/隐藏表情标签文本" },
 	{ name: "gear", description: "斗图档位：off/auto/active/always" },
 	{ name: "prompt", description: "查看/编辑自定义提示词" },
 ];
 
-function completeMemeArgs(prefix: string, library: MemeLibrary): AutocompleteItem[] | null {
+const MEME_PARAM_COMPLETIONS: Record<string, Array<{ value: string; description: string }>> = {
+	gear: [
+		{ value: "off", description: "不主动，仅明确要求时发" },
+		{ value: "auto", description: "看气氛（默认）" },
+		{ value: "active", description: "大部分合适回合都发" },
+		{ value: "always", description: "每轮都发" },
+	],
+	debug: [
+		{ value: "on", description: "显示 [表情: 描述 · 分类]" },
+		{ value: "off", description: "只显示图片" },
+	],
+	prompt: [{ value: "reset", description: "恢复默认提示词" }],
+};
+
+function tagCompletions(library: MemeLibrary): Array<{ value: string; description: string }> {
+	const stats = library.stats();
+	const items = Object.entries(stats.tags).map(([tag, count]) => ({ value: tag, description: `${count} 张` }));
+	const seen = new Set(items.map(item => item.value));
+	for (const [canonical, aliases] of Object.entries(TAG_ALIASES)) {
+		const count = stats.tags[canonical];
+		if (count === undefined) continue;
+		for (const alias of aliases) {
+			if (alias === canonical || seen.has(alias)) continue;
+			seen.add(alias);
+			items.push({ value: alias, description: `别名 → ${canonical}（${count} 张）` });
+		}
+	}
+	return items;
+}
+
+function packCompletions(library: MemeLibrary): Array<{ value: string; description: string }> {
+	const seen = new Set<string>();
+	return library.packs
+		.filter(pack => {
+			if (seen.has(pack.id)) return false;
+			seen.add(pack.id);
+			return true;
+		})
+		.map(pack => ({ value: pack.id, description: `${pack.name}，${pack.count} 张` }));
+}
+
+function completePath(argumentPrefix: string, cwd: string): Array<{ value: string; description: string }> {
+	const separator = Math.max(argumentPrefix.lastIndexOf("/"), argumentPrefix.lastIndexOf("\\"));
+	const directory = separator >= 0 ? argumentPrefix.slice(0, separator + 1) : "";
+	const name = argumentPrefix.slice(separator + 1);
+	let scan = directory;
+	if (scan === "~") scan = homedir();
+	else if (scan.startsWith("~/") || scan.startsWith("~\\")) scan = join(homedir(), scan.slice(2));
+	let entries: Dirent[];
+	try {
+		entries = readdirSync(scan ? resolve(cwd, scan) : cwd, { withFileTypes: true });
+	} catch {
+		return [];
+	}
+	const items: Array<{ value: string; description: string }> = [];
+	if ((!directory || name) && ".".startsWith(name)) {
+		items.push({ value: `${directory}./`, description: "当前目录" });
+	}
+	if ("..".startsWith(name)) items.push({ value: `${directory}../`, description: "上级目录" });
+	for (const entry of entries
+		.filter(entry => !entry.name.startsWith(".") && entry.name.toLowerCase().startsWith(name.toLowerCase()))
+		.sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name))
+		.slice(0, 50)) {
+		const isDirectory = entry.isDirectory();
+		items.push({
+			value: `${directory}${entry.name}${isDirectory ? "/" : ""}`,
+			description: isDirectory ? "目录" : "文件",
+		});
+	}
+	return items;
+}
+
+function completeMemeArgs(prefix: string, library: MemeLibrary, cwd: string): AutocompleteItem[] | null {
 	const space = prefix.indexOf(" ");
 	if (space === -1) {
 		const lower = prefix.toLowerCase();
-		const matches = MEME_SUBCOMMANDS.filter(item => item.name.startsWith(lower)).map(item => ({
+		const matched = MEME_SUBCOMMANDS.filter(item => item.name.startsWith(lower));
+		const items: AutocompleteItem[] = matched.map(item => ({
 			value: `${item.name} `,
 			label: item.name,
 			description: item.description,
 		}));
-		return matches.length > 0 ? matches : null;
+		const target = matched.length === 1 ? matched[0] : undefined;
+		if (target) {
+			const params =
+				target.name === "list" || target.name === "send"
+					? tagCompletions(library)
+					: target.name === "export"
+						? packCompletions(library)
+						: (MEME_PARAM_COMPLETIONS[target.name] ?? []);
+			for (const item of params) {
+				items.push({
+					value: `${target.name} ${item.value}`,
+					label: item.value,
+					description: item.description,
+				});
+			}
+		}
+		return items.length > 0 ? items : null;
 	}
 	const subcommand = prefix.slice(0, space).toLowerCase();
 	const rest = prefix.slice(space + 1);
@@ -59,33 +148,13 @@ function completeMemeArgs(prefix: string, library: MemeLibrary): AutocompleteIte
 			.map(item => ({ value: `${subcommand} ${head}${item.value}`, label: item.value, description: item.description }));
 		return matches.length > 0 ? matches : null;
 	};
-	if (subcommand === "list" || subcommand === "send") {
-		const stats = library.stats();
-		return complete(Object.entries(stats.tags).map(([tag, count]) => ({ value: tag, description: `${count} 张` })));
-	}
+	if (subcommand === "list" || subcommand === "send") return complete(tagCompletions(library));
+	if (subcommand === "import") return complete(completePath(last, cwd));
 	if (subcommand === "export") {
-		return complete(
-			library.packs.map(pack => ({ value: pack.id, description: `${pack.name}，${pack.count} 张` })),
-		);
+		return complete(rest.includes(" ") ? completePath(last, cwd) : packCompletions(library));
 	}
-	if (subcommand === "debug") {
-		return complete([
-			{ value: "on", description: "显示 [表情: 描述 · 分类]" },
-			{ value: "off", description: "只显示图片" },
-		]);
-	}
-	if (subcommand === "gear") {
-		return complete([
-			{ value: "off", description: "不主动，仅明确要求时发" },
-			{ value: "auto", description: "看气氛（默认）" },
-			{ value: "active", description: "大部分合适回合都发" },
-			{ value: "always", description: "每轮都发" },
-		]);
-	}
-	if (subcommand === "prompt") {
-		return complete([{ value: "reset", description: "恢复默认提示词" }]);
-	}
-	return null;
+	const params = MEME_PARAM_COMPLETIONS[subcommand];
+	return params ? complete(params) : null;
 }
 
 function parseWords(args: string): string[] {
@@ -111,34 +180,30 @@ function describeMeme(meme: Meme, userRoot: string): string {
 	return `${meme.packName} / ${meme.tag} / ${meme.caption} — ${short}`;
 }
 
+function formatMemeArgs(args: { tag?: string; query?: string }): string {
+	const parts: string[] = [];
+	if (args.tag) parts.push(`tag="${args.tag}"`);
+	if (args.query) parts.push(`query="${args.query}"`);
+	return parts.join(", ");
+}
+
+function memeResultText(content: ReadonlyArray<{ type: string; text?: string }>): string {
+	return content
+		.filter(block => block.type === "text")
+		.map(block => block.text ?? "")
+		.join("\n")
+		.trimEnd();
+}
+
 export default function ompMeme(pi: ExtensionAPI) {
 	const library = new MemeLibrary();
 	const pending = new Map<string, MemeMessageDetails>();
 	let config = loadMemeConfig(library.userRoot);
-	let toolSuppressed = false;
+	let sessionCwd = process.cwd();
 	pi.setLabel("表情包");
 
-	async function applyToolState(enabled: boolean): Promise<void> {
-		try {
-			if (!enabled) {
-				const active = pi.getActiveTools();
-				if (active.includes("send_meme")) {
-					await pi.setActiveTools(active.filter(name => name !== "send_meme"));
-					toolSuppressed = true;
-				}
-				return;
-			}
-			if (!toolSuppressed) return;
-			const active = pi.getActiveTools();
-			if (!active.includes("send_meme")) await pi.setActiveTools([...active, "send_meme"]);
-			toolSuppressed = false;
-		} catch (error) {
-			pi.logger.warn(`表情包工具开关失败：${error instanceof Error ? error.message : String(error)}`);
-		}
-	}
-
-	pi.on("session_start", async () => {
-		if (!config.enabled) await applyToolState(false);
+	pi.on("session_start", (_event, ctx) => {
+		sessionCwd = ctx.cwd;
 	});
 
 	pi.registerMessageRenderer(MEME_MESSAGE_TYPE, createMemeRenderer(() => config.debug));
@@ -187,18 +252,18 @@ export default function ompMeme(pi: ExtensionAPI) {
 			tag: pi.zod.string().optional(),
 			query: pi.zod.string().optional(),
 		}),
+		renderCall: (args, _options, theme) => {
+			if (!config.debug) return new Spacer(0);
+			const preview = formatMemeArgs(args);
+			const title = theme.fg("toolTitle", theme.bold("发送表情包"));
+			return new Text(preview ? `${title} ${theme.fg("dim", `└─ ${preview}`)}` : title, 0, 0);
+		},
+		renderResult: (result, _options, theme) => {
+			const text = memeResultText(result.content);
+			if (!config.debug) return result.isError && text ? new Text(theme.fg("error", text), 0, 0) : new Spacer(0);
+			return text ? new Text(theme.fg("toolOutput", text), 0, 0) : new Spacer(0);
+		},
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			if (!config.enabled) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: "表情包已关闭，本轮不发送表情。需要时提示用户用 /meme on 开启。",
-						},
-					],
-					details: { ok: false, disabled: true },
-				};
-			}
 			let result = library.pick({ tag: params.tag, query: params.query });
 			if (!result.ok && params.query && params.tag) result = library.pick({ tag: params.tag });
 			if (!result.ok && params.query) result = library.pick({ query: params.query });
@@ -232,7 +297,6 @@ export default function ompMeme(pi: ExtensionAPI) {
 	});
 
 	pi.on("before_agent_start", (event, ctx) => {
-		if (!config.enabled) return;
 		if (event.reason !== "prompt") return;
 		if (ctx.agent.kind !== "main") return;
 		if (!pi.getActiveTools().includes("send_meme")) return;
@@ -246,10 +310,6 @@ export default function ompMeme(pi: ExtensionAPI) {
 	pi.on("agent_end", (_event, ctx) => {
 		const sessionId = ctx.sessionManager.getSessionId();
 		const details = pending.get(sessionId);
-		if (!config.enabled) {
-			pending.delete(sessionId);
-			return;
-		}
 		if (!details) return;
 		pending.delete(sessionId);
 		deliverAfterReply(ctx, details);
@@ -261,7 +321,7 @@ export default function ompMeme(pi: ExtensionAPI) {
 
 	pi.registerCommand("meme", {
 		description: "表情包图库：list/import/export/packs/send/rescan",
-		getArgumentCompletions: prefix => completeMemeArgs(prefix, library),
+		getArgumentCompletions: prefix => completeMemeArgs(prefix, library, sessionCwd),
 		handler: async (args, ctx) => {
 			const words = parseWords(args.trim());
 			const subcommand = (words.shift() ?? "help").toLowerCase();
@@ -317,10 +377,6 @@ export default function ompMeme(pi: ExtensionAPI) {
 						return;
 					}
 					case "send": {
-						if (!config.enabled) {
-							ctx.ui.notify("表情包已关闭，用 /meme on 开启。", "warning");
-							return;
-						}
 						const request = words.join(" ");
 						let result = library.pick({ tag: request });
 						if (!result.ok) result = library.pick({ query: request });
@@ -335,28 +391,15 @@ export default function ompMeme(pi: ExtensionAPI) {
 						sendMemeMessage(ctx, details, true);
 						return;
 					}
-					case "on":
-					case "off": {
-						const enabled = subcommand === "on";
-						config = { ...config, enabled };
-						saveMemeConfig(library.userRoot, config);
-						if (!enabled) pending.clear();
-						await applyToolState(enabled);
-						ctx.ui.notify(
-							enabled
-								? "表情包已开启：会按情绪主动配图。"
-								: "表情包已关闭：不再注入提示词，模型和 /meme send 都不会发图。",
-							"info",
-						);
-						return;
-					}
 					case "debug": {
 						const value = words[0]?.toLowerCase();
 						const debug = value === "on" ? true : value === "off" ? false : !config.debug;
 						config = { ...config, debug };
 						saveMemeConfig(library.userRoot, config);
 						ctx.ui.notify(
-							debug ? "调试文本已开启：每条表情上方显示 [表情: 描述 · 分类]" : "调试文本已关闭：只显示图片",
+							debug
+								? "调试输出已开启：显示 send_meme 调用卡片，以及图片上方的 [表情: 描述 · 分类]"
+								: "调试输出已关闭：不显示 send_meme 调用卡片与表情标签，只显示图片",
 							"info",
 						);
 						return;
@@ -365,7 +408,14 @@ export default function ompMeme(pi: ExtensionAPI) {
 						const value = words[0]?.toLowerCase();
 						if (!value) {
 							ctx.ui.notify(
-								`当前斗图档位：${config.gear}\n可选：${MEME_GEARS.join(" / ")}`,
+								[
+									`当前斗图档位：${config.gear}`,
+									"  off    不主动，只回文字；用户明确要求时才发",
+									"  auto   看气氛（默认）：情绪、接梗、吐槽时发",
+									"  active 活跃：大部分合适回合都发",
+									"  always 每轮都发",
+									`切换：/meme gear <${MEME_GEARS.join("|")}>`,
+								].join("\n"),
 								"info",
 							);
 							return;
@@ -406,7 +456,6 @@ export default function ompMeme(pi: ExtensionAPI) {
 					case "status": {
 						ctx.ui.notify(
 							[
-								config.enabled ? "表情包：已开启" : "表情包：已关闭",
 								`斗图档位：${config.gear}`,
 								config.prompt ? `提示词：自定义（${config.prompt.length} 字）` : "提示词：默认",
 								config.debug ? "调试文本：开启" : "调试文本：关闭",
@@ -431,9 +480,10 @@ export default function ompMeme(pi: ExtensionAPI) {
 						const stats = library.stats();
 						ctx.ui.notify(
 							[
-								`表情包：${stats.packs} 个图库，${stats.images} 张静态图片（${config.enabled ? `已开启，档位 ${config.gear}` : "已关闭"}）`,
-								"/meme on | off | status",
+								`表情包：${stats.packs} 个图库，${stats.images} 张静态图片（档位 ${config.gear}）`,
+								"/meme status",
 								"/meme gear [off|auto|active|always]",
+								"  off=不主动  auto=看气氛  active=活跃  always=每轮都发",
 								"/meme prompt [文本|reset]",
 								"/meme debug [on|off]",
 								"/meme list [分类|关键词]",

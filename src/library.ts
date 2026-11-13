@@ -9,7 +9,7 @@ export const IMAGE_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".bmp
 
 const MAX_DOWNLOAD_BYTES = 64 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 30_000;
-const TAG_ALIASES: Record<string, string[]> = {
+export const TAG_ALIASES: Record<string, string[]> = {
 	happy: ["happy", "开心", "高兴", "快乐", "笑", "得意", "点赞", "ok", "好耶"],
 	angry: ["angry", "生气", "愤怒", "嫌弃", "不爽"],
 	sad: ["sad", "难过", "伤心", "哭", "求饶", "委屈"],

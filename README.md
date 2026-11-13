@@ -75,11 +75,10 @@ extensions:
 | `/meme export [图库] [目标.zip]` | 导出图库；默认导出全部用户图库到当前目录 |
 | `/meme rescan` | 重新扫描图库目录 |
 | `/meme path` | 显示图库根目录 |
-| `/meme on` / `/meme off` | 开启/关闭表情包（关闭后不注入提示词、从活动工具移除 `send_meme`、不发图） |
 | `/meme gear [off\|auto\|active\|always]` | 斗图档位：关闭 / 看气氛 / 活跃 / 每轮都发 |
 | `/meme prompt [文本\|reset]` | 查看/编辑自定义提示词；无参数打开多行编辑器 |
 | `/meme status` | 查看开关、档位与调试文本状态 |
-| `/meme debug [on\|off]` | 是否在图片上方显示 `[表情: 描述 · 分类]`，默认关闭 |
+| `/meme debug [on\|off]` | 是否显示调试文本：图片上方 `[表情: 描述 · 分类]` 与 `send_meme` 的调用卡片，默认关闭 |
 
 导出 ZIP 的条目为 `<pack>/...`，可直接再导入。
 
@@ -91,7 +90,7 @@ extensions:
 - 返回描述与分类，图片由扩展在本轮回复结束后追加，模型无需写图片路径；
 - 未命中时返回真实分类统计，便于模型换词或改纯文字回复。
 
-回复里默认只显示图片，不显示 `[表情: 描述 · 分类]` 文本；需要排查选图时用 `/meme debug on` 打开标签。开关、档位与调试状态存在用户图库根目录的 `omp-meme.json`。
+回复里默认只显示图片：既没有 `[表情: 描述 · 分类]` 文本，也不显示 `send_meme` 的工具调用卡片（参数与“已选表情”结果）；需要排查选图时用 `/meme debug on` 同时打开这两处调试输出。档位与调试状态存在用户图库根目录的 `omp-meme.json`。
 
 ## 主动配图
 
@@ -111,7 +110,7 @@ extensions:
 
 自定义提示词（对应 dsh-meme 的 `companionPrompt`）：`/meme prompt` 打开多行编辑器，`/meme prompt <文本>` 直接设置，`/meme prompt reset` 恢复默认。自定义文本原文保留，只在末尾追加当前档位规则；默认文本包含「大肥鱼就是你自己」等身份设定。
 
-档位与开关写在 `<userRoot>/omp-meme.json`（`{enabled, debug, gear, prompt}`）。`/meme off` 是全局关闭：不注入提示词并从活动工具中移除 `send_meme`；`/meme on` 恢复。
+档位、提示词与调试状态写在 `<userRoot>/omp-meme.json`（`{debug, gear, prompt}`）。`gear=off` 只停止主动配图，用户明确要求时仍可发；要彻底禁用整个插件，用 `omp plugin disable omp-meme`。
 
 ## 工作方式
 
